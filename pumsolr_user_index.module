@@ -1,0 +1,132 @@
+<?php
+/**
+ * @author Jaap Jansma (CiviCooP) <jaap.jansma@civicoop.org>
+ * @license http://www.gnu.org/licenses/agpl-3.0.html
+ */
+
+/**
+* Add information to index users.
+* There are some modules in http://drupal.org that can give a good example of
+* custom entity indexing such as apachesolr_user, apachesolr_term
+*
+* @param array $entity_info
+*/
+function pumsolr_user_index_apachesolr_entity_info_alter(array &$entity_info) {
+  $entity_info['user'] = array();
+  $entity_info['user']['indexable'] = TRUE;
+  $entity_info['user']['status callback'][] = 'pumsolr_user_index_status_callback';
+  $entity_info['user']['document callback'][] = 'pumsolr_user_index_document';
+  $entity_info['user']['reindex callback'] = 'pumsolr_user_index_document_reindex';
+  $entity_info['user']['index_table'] = 'pumsolr_user_index_entities_user';
+  //$entity_info['user']['result callback'] = 'pumsolr_user_user_result';
+}
+
+/**
+ * Status callback for ApacheSolr, for users.
+ */
+function pumsolr_user_index_status_callback($entity_id, $entity_type) {
+  $user = user_load($entity_id);
+  if (!$user->status) {
+    // When a user is inactive do not index this user.
+    return false;
+  }
+
+  if (in_array('Customer (contact)', $user->roles)) {
+    // When a user has the role 'Customer (Contact)' do not index the user.
+    return false;
+  }
+
+  $contact = pumsolr_user_index_get_civicrm_contact($entity_id);
+  if (!$contact) {
+    return false;
+  }
+  return true;
+}
+
+function pumsolr_user_index_get_civicrm_contact($uid) {
+  try {
+    civicrm_initialize();
+    $contact_id = civicrm_api3('UFMatch', 'getvalue', array('uf_id' => $uid, 'return' => 'contact_id'));
+    $contact_params['id'] = $contact_id;
+    $contact_params['is_deceased'] = 0;
+    $contact_params['is_deleted'] = 0;
+    $contact = civicrm_api3('Contact', 'getsingle', $contact_params);
+    // Contact is found and not deceased in CiviCRM.
+    return $contact;
+  } catch (Exception $e) {
+    // Do nothing.
+  }
+  return false;
+}
+
+/**
+ * Builds the user-specific information for a Solr document.
+ *
+ * @param ApacheSolrDocument $document
+ *   The Solr document we are building up.
+ * @param stdClass $entity
+ *   The entity we are indexing.
+ * @param string $entity_type
+ *   The type of entity we're dealing with.
+ *
+ * @return array A set of ApacheSolrDocument documents
+ */
+function pumsolr_user_index_document(ApacheSolrDocument $document, $account, $entity_type) {
+  $contact = pumsolr_user_index_get_civicrm_contact($account->uid);
+  $document->uid = $account->uid;
+  $document->label = apachesolr_clean_text($contact->display_name);
+  $document->mail = $account->mail;
+
+  try {
+    $phone = civicrm_api3('Phone', 'getsingle', array('contact_id' => $contact['id'], 'is_primary' => '1'));
+    $document->ts_phone = $phone['phone'];
+  } catch (Exception $e) {
+    // Do nothing.
+  }
+
+  //  Generic use case for future reference. Callbacks can
+  //  allow you to send back multiple documents
+  $documents = array();
+  $documents[] = $document;
+  return $documents;
+}
+
+/**
+ * Reindex all the users
+ *
+ * @return bool
+ */
+function pumsolr_user_index_document_reindex() {
+  $indexer_table = apachesolr_get_indexer_table('user');
+  $transaction = db_transaction();
+  $env_id = apachesolr_default_environment();
+  try {
+    db_delete($indexer_table)
+      ->condition('entity_type', 'user')
+      ->execute();
+
+    // We know there's only one bundle type, so if that doesn't get indexed just
+    // skip this entirely.
+    if (apachesolr_get_index_bundles($env_id, 'user')) {
+      $select = db_select('users', 'u');
+      $select->addExpression("'user'", 'entity_type');
+      $select->addExpression("'user'", 'bundle');
+      $select->addField('u', 'uid', 'entity_id');
+      $select->addField('u', 'status', 'status');
+      $select->addExpression(REQUEST_TIME, 'changed');
+
+      $insert = db_insert($indexer_table)
+        ->fields(array('entity_id', 'status', 'entity_type', 'bundle', 'changed'))
+        ->from($select)
+        ->execute();
+    }
+  }
+  catch (Exception $e) {
+    $transaction->rollback();
+    drupal_set_message($e->getMessage(), 'error');
+    watchdog_exception('Apache Solr', $e);
+    return FALSE;
+  }
+
+  return TRUE;
+}

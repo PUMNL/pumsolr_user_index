@@ -76,7 +76,7 @@ function pumsolr_user_index_document(ApacheSolrDocument $document, $account, $en
   $contact = pumsolr_user_index_get_civicrm_contact($account->uid);
   if ($contact) {
     $document->uid = $account->uid;
-    $document->label = apachesolr_clean_text($contact->display_name);
+    $document->label = apachesolr_clean_text($contact['display_name']);
     $document->mail = $account->mail;
 
     try {

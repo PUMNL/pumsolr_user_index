@@ -72,22 +72,25 @@ function pumsolr_user_index_get_civicrm_contact($uid) {
  * @return array A set of ApacheSolrDocument documents
  */
 function pumsolr_user_index_document(ApacheSolrDocument $document, $account, $entity_type) {
-  $contact = pumsolr_user_index_get_civicrm_contact($account->uid);
-  $document->uid = $account->uid;
-  $document->label = apachesolr_clean_text($contact->display_name);
-  $document->mail = $account->mail;
-
-  try {
-    $phone = civicrm_api3('Phone', 'getsingle', array('contact_id' => $contact['id'], 'is_primary' => '1'));
-    $document->ts_phone = $phone['phone'];
-  } catch (Exception $e) {
-    // Do nothing.
-  }
-
-  //  Generic use case for future reference. Callbacks can
-  //  allow you to send back multiple documents
   $documents = array();
-  $documents[] = $document;
+  $contact = pumsolr_user_index_get_civicrm_contact($account->uid);
+  if ($contact) {
+    $document->uid = $account->uid;
+    $document->label = apachesolr_clean_text($contact->display_name);
+    $document->mail = $account->mail;
+
+    try {
+      $phone = civicrm_api3('Phone', 'getsingle', array(
+        'contact_id' => $contact['id'],
+        'is_primary' => '1'
+      ));
+      $document->ts_phone = $phone['phone'];
+    } catch (Exception $e) {
+      // Do nothing.
+    }
+
+    $documents[] = $document;
+  }
   return $documents;
 }
 

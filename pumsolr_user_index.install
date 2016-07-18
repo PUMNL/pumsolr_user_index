@@ -10,7 +10,7 @@
  */
 function pumsolr_user_index_schema() {
   $types = array(
-    'user' => 'apachesolr_index_entities_user',
+    'user' => 'pumsolr_user_index_entities_user',
   );
   foreach ($types as $type) {
     $schema[$type] = array(

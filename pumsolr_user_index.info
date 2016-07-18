@@ -5,3 +5,4 @@ package = PUM SOLR
 version = "7.x-1.15.1"
 dependencies[] = apachesolr (>=1.7)
 dependencies[] = pum_portal
+dependencies[] = user
